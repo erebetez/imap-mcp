@@ -1,0 +1,16 @@
+{
+  "name": "imap-client",
+  "version": "1.0.0",
+  "description": "Imap Client",
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "dependencies": {
+    "imap": "^0.8.19",
+    "mailparser": "^3.9.15"
+  }
+}
