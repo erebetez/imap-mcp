@@ -10,7 +10,7 @@
  npm install
  ```
 
- (The dependencies are plain `imap` and `mailparser` -- `npm install` and `yarn add imap mailparser` both work against the included `package.json`.)
+ (The dependencies are plain `imap` and `postal-mime` -- `npm install` and `yarn add imap postal-mime` both work against the included `package.json`.)
 
  ## Configuration
 

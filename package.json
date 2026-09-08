@@ -11,6 +11,6 @@
   },
   "dependencies": {
     "imap": "^0.8.19",
-    "mailparser": "^3.9.15"
+    "postal-mime": "^3.0.0"
   }
 }
