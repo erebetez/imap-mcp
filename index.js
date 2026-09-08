@@ -8,12 +8,12 @@
  *
  * Communicates over stdio using JSON-RPC 2.0 or streamable HTTP
 
- * SETUP: yarn add imap mailparser
+ * SETUP: yarn add imap postal-mime
  */
 
 const http = require('http');
 const Imap = require('imap');
-const { simpleParser } = require('mailparser');
+const PostalMime = require('postal-mime');
 
 const SERVER_INFO = {
   name: 'imap',
@@ -121,6 +121,28 @@ function jsonrpcError(id, code, message) {
 
 // ─── IMAP helpers ────────────────────────────────────────────────────────────
 
+function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.once('end', () => resolve(Buffer.concat(chunks)));
+    stream.once('error', reject);
+  });
+}
+
+async function parseMessageStream(stream) {
+  const buffer = await streamToBuffer(stream);
+  return PostalMime.parse(buffer);
+}
+
+// Formats a postal-mime Address (Mailbox or address group) as display text,
+// e.g. "Jane Doe <jane@example.com>".
+function formatAddress(addr) {
+  if (!addr) return 'unknown';
+  if (addr.group) return addr.group.map(formatAddress).join(', ');
+  return addr.name ? `${addr.name} <${addr.address}>` : (addr.address || 'unknown');
+}
+
 // Fetches and parses a single message by UID. Used to pull messages one at a
 // time (sequentially) instead of issuing one multi-UID FETCH, since some IMAP
 // servers misbehave when asked to stream back many messages at once.
@@ -132,10 +154,7 @@ async function fetchOneMessage(imap, uid) {
     fetched.on('message', (msg) => {
       msg.once('attributes', (a) => { attrs = a; });
       msg.on('body', (stream) => {
-        simpleParser(stream, (err, parsed) => {
-          if (err) return reject(err);
-          resolve({ attrs, parsed });
-        });
+        parseMessageStream(stream).then((parsed) => resolve({ attrs, parsed }), reject);
       });
     });
 
@@ -176,8 +195,7 @@ async function listUnseenEmails(account) {
     for (const uid of results) {
       try {
         const { attrs, parsed } = await fetchOneMessage(imap, uid);
-        const from = parsed.from;
-        const fromText = Array.isArray(from) ? from[0].text : (from?.text || 'unknown');
+        const fromText = formatAddress(parsed.from);
         emails.push({ uid: attrs?.uid ?? uid, account: account.source, from: fromText, date: parsed.date, subject: parsed.subject || '(no subject)' });
       } catch (err) {
         console.error(`Fetch/parse error uid=${uid}: ${err.message}`);
@@ -217,22 +235,22 @@ async function fetchEmailById(uid, account) {
       });
 
       msg.on('body', (stream) => {
-        simpleParser(stream, (err, parsed) => {
+        parseMessageStream(stream).then((parsed) => {
           imap.end();
-          if (err) return reject(new Error(`Parse error: ${err.message}`));
           resolve({
             uid: collectedUid ?? uid,
             account: account.source,
-            from: parsed.from?.text || 'unknown',
+            from: formatAddress(parsed.from),
             subject: parsed.subject || '(no subject)',
-            date: parsed.date?.toISOString() || '',
+            date: parsed.date || '',
             text: parsed.text || '',
             html: parsed.html || '',
             messageId: parsed.messageId || null,
-            inReplyTo: Array.isArray(parsed.inReplyTo)
-              ? parsed.inReplyTo.map((m) => m.value).join(', ')
-              : (parsed.inReplyTo || null),
+            inReplyTo: parsed.inReplyTo || null,
           });
+        }, (err) => {
+          imap.end();
+          reject(new Error(`Parse error: ${err.message}`));
         });
       });
     });
@@ -310,9 +328,8 @@ async function importRecentEmailsForAccount({ days, mailbox, account }) {
       try {
         const { attrs, parsed } = await fetchOneMessage(imap, uid);
         const flags = attrs?.flags || [];
-        const from = parsed.from;
-        const fromText = Array.isArray(from) ? from[0].text : (from?.text || 'unknown');
-        const date = parsed.date ? parsed.date.toISOString() : null;
+        const fromText = formatAddress(parsed.from);
+        const date = parsed.date || null;
         const record = {
           source: account.source,
           mailbox,
@@ -325,9 +342,7 @@ async function importRecentEmailsForAccount({ days, mailbox, account }) {
           seen: flags.includes('\\Seen') ? 1 : 0,
           text: parsed.text || '',
           html: parsed.html || '',
-          inReplyTo: Array.isArray(parsed.inReplyTo)
-            ? parsed.inReplyTo.map((m) => m.value).join(', ')
-            : (parsed.inReplyTo || null),
+          inReplyTo: parsed.inReplyTo || null,
           importedAt: new Date().toISOString(),
         };
         cache.upsertEmail(record);
